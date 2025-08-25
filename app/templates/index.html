@@ -1,0 +1,215 @@
+\
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>Pi File Transfer</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; padding: 12px; }
+    h1 { font-size: 18px; margin: 8px 0; }
+    .panel { border: 1px solid #ddd; border-radius: 12px; padding: 12px; margin-bottom: 12px; }
+    label { display:block; font-weight: 600; margin-bottom:6px; }
+    select, button { width: 100%; padding: 10px; font-size: 16px; border-radius: 10px; border: 1px solid #ccc; margin: 6px 0; }
+    .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .tree { border: 1px solid #eee; border-radius: 10px; padding: 8px; max-height: 40vh; overflow: auto; background: #fafafa; }
+    .item { padding: 6px; border-radius: 8px; }
+    .item:hover { background: #f0f0f0; cursor: pointer; }
+    .path { font-size: 12px; color: #555; word-break: break-all; }
+    .actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+    .status { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: 13px; }
+    .progress { height: 14px; border-radius: 7px; background: #eee; overflow: hidden; }
+    .bar { height: 100%; width: 0%; background: #4caf50; }
+  </style>
+</head>
+<body>
+  <h1>Transfert de dossiers (Raspberry Pi)</h1>
+  <div class="cols">
+    <div class="panel">
+      <label>Source</label>
+      <select id="srcDevice"></select>
+      <div class="path" id="srcPath"></div>
+      <div class="tree" id="srcTree"></div>
+    </div>
+    <div class="panel">
+      <label>Destination</label>
+      <select id="dstDevice"></select>
+      <div class="path" id="dstPath"></div>
+      <div class="tree" id="dstTree"></div>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="actions">
+      <button id="copyBtn">Copier</button>
+      <button id="moveBtn">Couper</button>
+      <button id="ejectBtn">Éjecter</button>
+    </div>
+    <div style="margin-top:10px;">
+      <div class="progress"><div class="bar" id="bar"></div></div>
+      <div class="status" id="status">Prêt.</div>
+    </div>
+  </div>
+
+<script>
+let devices = [];
+let srcCurrent = null;
+let dstCurrent = null;
+
+async function fetchJSON(url, opts) {
+  const r = await fetch(url, opts);
+  if (!r.ok) throw new Error(await r.text());
+  return await r.json();
+}
+
+function setStatus(text) {
+  document.getElementById('status').innerText = text;
+}
+
+function setProgress(p) {
+  document.getElementById('bar').style.width = (p||0) + '%';
+}
+
+function makeDeviceOptions() {
+  const make = (selId) => {
+    const sel = document.getElementById(selId);
+    sel.innerHTML = "";
+    for (const d of devices) {
+      const opt = document.createElement('option');
+      opt.value = d.mountpoint;
+      opt.textContent = `${d.label} (${d.mountpoint})`;
+      sel.appendChild(opt);
+    }
+    sel.addEventListener('change', () => {
+      const mnt = sel.value;
+      if (selId === 'srcDevice') {
+        srcCurrent = { base: mnt, path: mnt };
+        document.getElementById('srcPath').innerText = mnt;
+        loadTree('srcTree', mnt, true);
+      } else {
+        dstCurrent = { base: mnt, path: mnt };
+        document.getElementById('dstPath').innerText = mnt;
+        loadTree('dstTree', mnt, true);
+      }
+    });
+    sel.dispatchEvent(new Event('change'));
+  };
+  make('srcDevice');
+  make('dstDevice');
+}
+
+async function loadDevices() {
+  devices = await fetchJSON('/api/devices');
+  makeDeviceOptions();
+}
+
+async function loadTree(elId, path, root=false) {
+  const el = document.getElementById(elId);
+  el.innerHTML = "";
+  try {
+    const items = await fetchJSON('/api/list?path=' + encodeURIComponent(path));
+    // clickable ".." to go up
+    if (!root) {
+      const up = document.createElement('div');
+      up.className = 'item';
+      up.textContent = '⬆️ ..';
+      up.onclick = () => {
+        const parent = path.split('/').slice(0,-1).join('/') || '/';
+        loadTree(elId, parent, parent === '/' );
+        if (elId === 'srcTree') {
+          srcCurrent.path = parent;
+          document.getElementById('srcPath').innerText = parent;
+        } else {
+          dstCurrent.path = parent;
+          document.getElementById('dstPath').innerText = parent;
+        }
+      };
+      el.appendChild(up);
+    }
+    for (const i of items) {
+      if (!i.is_dir) continue; // only directories selectable
+      const div = document.createElement('div');
+      div.className = 'item';
+      div.textContent = '📁 ' + i.name;
+      div.onclick = () => {
+        loadTree(elId, i.path, false);
+        if (elId === 'srcTree') {
+          srcCurrent.path = i.path;
+          document.getElementById('srcPath').innerText = i.path;
+        } else {
+          dstCurrent.path = i.path;
+          document.getElementById('dstPath').innerText = i.path;
+        }
+      };
+      el.appendChild(div);
+    }
+  } catch (e) {
+    el.innerText = 'Erreur: ' + e;
+  }
+}
+
+async function startTransfer(mode) {
+  if (!srcCurrent || !dstCurrent) return;
+  setStatus('Démarrage...');
+  setProgress(0);
+  try {
+    const res = await fetchJSON('/api/transfer', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({mode: mode, src: srcCurrent.path, dst: dstCurrent.path})
+    });
+  } catch (e) {
+    setStatus('Erreur: ' + e);
+    return;
+  }
+}
+
+async function pollStatus() {
+  try {
+    const s = await fetchJSON('/api/status');
+    if (s.active) {
+      let line = `${s.mode||''} ${Math.round(s.percent||0)}%`;
+      if (s.speed) line += ` | ${s.speed}`;
+      if (s.eta) line += ` | ETA ${s.eta}`;
+      if (s.message) line += ` | ${s.message}`;
+      setStatus(line);
+      setProgress(s.percent||0);
+    } else {
+      if (s.error) {
+        setStatus('Erreur: ' + s.error);
+      } else {
+        setStatus('Inactif. ' + (s.message || ''));
+      }
+      if ((s.percent||0) >= 100) setProgress(100);
+    }
+  } catch (e) {
+    setStatus('Erreur: ' + e);
+  } finally {
+    setTimeout(pollStatus, 1000);
+  }
+}
+
+async function ejectSelected() {
+  // Try to eject destination first; else source
+  const mnt = (dstCurrent && dstCurrent.base) || (srcCurrent && srcCurrent.base);
+  if (!mnt) return;
+  try {
+    const res = await fetchJSON('/api/eject', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({mountpoint: mnt})
+    });
+    alert('Éjecté: ' + mnt);
+  } catch (e) {
+    alert('Échec éjection: ' + e);
+  }
+}
+
+document.getElementById('copyBtn').onclick = () => startTransfer('copy');
+document.getElementById('moveBtn').onclick = () => startTransfer('move');
+document.getElementById('ejectBtn').onclick = ejectSelected;
+
+loadDevices();
+pollStatus();
+</script>
+</body>
+</html>
