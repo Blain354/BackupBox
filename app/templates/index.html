@@ -1,54 +1,59 @@
-\
 <!doctype html>
 <html lang="fr">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
   <title>Pi File Transfer</title>
+  <link href="{{ url_for('static', filename='css/bootstrap.min.css') }}" rel="stylesheet">
   <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; padding: 12px; }
-    h1 { font-size: 18px; margin: 8px 0; }
-    .panel { border: 1px solid #ddd; border-radius: 12px; padding: 12px; margin-bottom: 12px; }
-    label { display:block; font-weight: 600; margin-bottom:6px; }
-    select, button { width: 100%; padding: 10px; font-size: 16px; border-radius: 10px; border: 1px solid #ccc; margin: 6px 0; }
-    .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
     .tree { border: 1px solid #eee; border-radius: 10px; padding: 8px; max-height: 40vh; overflow: auto; background: #fafafa; }
     .item { padding: 6px; border-radius: 8px; }
     .item:hover { background: #f0f0f0; cursor: pointer; }
     .path { font-size: 12px; color: #555; word-break: break-all; }
-    .actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
     .status { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: 13px; }
-    .progress { height: 14px; border-radius: 7px; background: #eee; overflow: hidden; }
-    .bar { height: 100%; width: 0%; background: #4caf50; }
   </style>
 </head>
 <body>
-  <h1>Transfert de dossiers (Raspberry Pi)</h1>
-  <div class="cols">
-    <div class="panel">
-      <label>Source</label>
-      <select id="srcDevice"></select>
-      <div class="path" id="srcPath"></div>
-      <div class="tree" id="srcTree"></div>
+  <div class="container my-4">
+    <h1 class="h4 mb-4">Transfert de dossiers (Raspberry Pi)</h1>
+    <div class="row g-3">
+      <div class="col-md-6">
+        <div class="card">
+          <div class="card-body">
+            <label class="form-label">Source</label>
+            <select id="srcDevice" class="form-select mb-2"></select>
+            <div class="path mb-2" id="srcPath"></div>
+            <div class="tree" id="srcTree"></div>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="card">
+          <div class="card-body">
+            <label class="form-label">Destination</label>
+            <select id="dstDevice" class="form-select mb-2"></select>
+            <div class="path mb-2" id="dstPath"></div>
+            <div class="tree" id="dstTree"></div>
+          </div>
+        </div>
+      </div>
     </div>
-    <div class="panel">
-      <label>Destination</label>
-      <select id="dstDevice"></select>
-      <div class="path" id="dstPath"></div>
-      <div class="tree" id="dstTree"></div>
+    <div class="card mt-3">
+      <div class="card-body">
+        <div class="row g-2 mb-3">
+          <div class="col-md-4"><button id="copyBtn" class="btn btn-primary w-100">Copier</button></div>
+          <div class="col-md-4"><button id="moveBtn" class="btn btn-secondary w-100">Couper</button></div>
+          <div class="col-md-4"><button id="ejectBtn" class="btn btn-warning w-100">Éjecter</button></div>
+        </div>
+        <div class="progress mb-2" style="height:14px;">
+          <div class="progress-bar" id="bar" role="progressbar" style="width: 0%;"></div>
+        </div>
+        <div class="status" id="status">Prêt.</div>
+      </div>
     </div>
   </div>
-  <div class="panel">
-    <div class="actions">
-      <button id="copyBtn">Copier</button>
-      <button id="moveBtn">Couper</button>
-      <button id="ejectBtn">Éjecter</button>
-    </div>
-    <div style="margin-top:10px;">
-      <div class="progress"><div class="bar" id="bar"></div></div>
-      <div class="status" id="status">Prêt.</div>
-    </div>
-  </div>
+  <script src="{{ url_for('static', filename='js/bootstrap.bundle.min.js') }}"></script>
 
 <script>
 let devices = [];
