@@ -24,6 +24,11 @@ Application web (Flask) pour Raspberry Pi pour copier/couper des dossiers volumi
 Le service démarre automatiquement: `pi-file-transfer.service`.
 Accès: `http://<IP-du-Pi>:8080`
 
+## Scripts
+
+- `setup.sh <url>` : télécharge l'archive ZIP du projet (via Internet) puis lance `install.sh`.
+- `update.sh <archive.zip>` : met à jour une installation existante à partir d'une archive locale sans connexion réseau.
+
 ## Éjection
 Le bouton "Éjecter" tente `umount <mountpoint>` puis `sync`. Selon votre configuration, `sudo` peut être requis.
 Si nécessaire, ajoutez pour `umount` l'autorisation sans mot de passe au groupe `pi` (optionnel).
