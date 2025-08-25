@@ -1,4 +1,3 @@
-\
 from flask import Flask, jsonify, request, send_from_directory, render_template
 import os, json, subprocess, re, shlex, time
 from pathlib import Path
