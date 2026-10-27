@@ -16,7 +16,8 @@ cleanup() {
 trap cleanup EXIT
 
 cd "$ROOT"
-"$PYTHON" -m backupbox --simulate "$WORK/dev" --state-dir "$WORK/state" --host 127.0.0.1 --port "$PORT" --poll 0.5 \
+"$PYTHON" -m backupbox --simulate "$WORK/dev" --state-dir "$WORK/state" --buffer-dir "$WORK/pi-buffer" \
+  --host 127.0.0.1 --port "$PORT" --poll 0.5 \
   >"$WORK/server.log" 2>&1 &
 SERVER_PID=$!
 

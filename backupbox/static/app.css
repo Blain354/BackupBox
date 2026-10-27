@@ -284,3 +284,48 @@ dialog::backdrop {
 .problems li { margin-bottom: 0.35rem; overflow-wrap: anywhere; }
 
 .empty { color: var(--muted); font-style: italic; }
+
+/* Quick actions ------------------------------------------------------------ */
+.quick-panel { border-color: var(--accent); }
+.card.quick { gap: 0.65rem; }
+.quick-head { display: flex; gap: 0.75rem; align-items: center; }
+.device-icon { font-size: 2rem; line-height: 1; }
+.quick-title { font-size: 1.1rem; font-weight: 700; overflow-wrap: anywhere; }
+.inventory { font-variant-numeric: tabular-nums; }
+.btn.big { width: 100%; min-height: 56px; font-size: 1.1rem; }
+.center { text-align: center; }
+
+.segmented {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+.segmented legend { width: 100%; margin-bottom: 0.3rem; }
+.seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 40px;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.seg:has(input:checked) { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.seg input { margin: 0; }
+
+.pending { margin: 0; padding-left: 1.1rem; font-size: 0.9rem; }
+.settings h3 { margin: 0.6rem 0 0; font-size: 0.95rem; color: var(--muted); }
+.field select {
+  min-height: 44px;
+  padding: 0.5rem 0.65rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}

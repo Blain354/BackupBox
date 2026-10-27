@@ -19,13 +19,19 @@
   <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
 
   <main>
+    <section aria-labelledby="quick-title" class="panel quick-panel" id="quick-panel" hidden>
+      <h2 id="quick-title">À faire maintenant</h2>
+      <div id="quick" class="stack"></div>
+    </section>
+
     <section aria-labelledby="dest-title" class="panel">
-      <h2 id="dest-title">SSD de destination</h2>
-      <div id="destination"></div>
+      <h2 id="dest-title">Stockage</h2>
+      <div id="destination" class="stack"></div>
+      <div id="buffer" class="stack"></div>
     </section>
 
     <section aria-labelledby="cards-title" class="panel">
-      <h2 id="cards-title">Cartes</h2>
+      <h2 id="cards-title">Appareils branchés</h2>
       <div id="cards" class="stack"></div>
     </section>
 
@@ -37,15 +43,37 @@
     <details class="panel" id="settings-panel">
       <summary><h2>Réglages</h2></summary>
       <form id="settings-form" class="settings">
-        <label class="switch"><input type="checkbox" name="auto_backup"> Sauvegarde automatique à l'insertion d'une carte</label>
+        <h3>Sauvegarde</h3>
+        <label class="switch"><input type="checkbox" name="auto_backup"> Sauvegarde automatique quand un appareil est branché</label>
         <label class="field">
-          <span>Délai avant le démarrage pour une carte inconnue (secondes)</span>
+          <span>Délai avant le démarrage pour un appareil jamais vu (secondes)</span>
           <input type="number" name="countdown_s" min="0" max="600" step="1" inputmode="numeric" required>
         </label>
-        <label class="switch"><input type="checkbox" name="auto_eject"> Éjecter la carte quand la sauvegarde est vérifiée</label>
-        <label class="switch"><input type="checkbox" name="verify"> Relire chaque fichier sur le SSD pour le vérifier (recommandé)</label>
+        <label class="field">
+          <span>Fichiers à copier par défaut</span>
+          <select name="default_preset">
+            <option value="all">Tout (recommandé)</option>
+            <option value="no_previews">Sans aperçus (.LRV .LRF .THM)</option>
+            <option value="videos_only">Vidéos seulement</option>
+          </select>
+        </label>
+        <label class="switch"><input type="checkbox" name="auto_eject"> Éjecter l'appareil quand la sauvegarde est vérifiée</label>
+        <label class="switch"><input type="checkbox" name="auto_drain"> Vider le tampon du Pi vers le SSD dès qu'il est branché</label>
+        <label class="switch"><input type="checkbox" name="verify"> Relire chaque fichier sur le disque pour le vérifier (recommandé)</label>
         <label class="switch"><input type="checkbox" name="strict_recheck"> Revérifier aussi les fichiers déjà sauvegardés (lent)</label>
-        <label class="switch"><input type="checkbox" name="led"> Utiliser la DEL verte du Pi comme témoin</label>
+        <h3>Témoins</h3>
+        <label class="switch"><input type="checkbox" name="led"> DEL du Pi comme témoin (cœur = écriture, fixe = terminé)</label>
+        <label class="switch"><input type="checkbox" name="buzzer"> Buzzer : double bip pendant l'écriture, mélodie à la fin</label>
+        <label class="field">
+          <span>Un double bip toutes les … secondes pendant l'écriture</span>
+          <input type="number" name="beep_interval_s" min="1" max="60" step="1" inputmode="numeric" required>
+        </label>
+        <h3>Téléphone</h3>
+        <label class="switch"><input type="checkbox" name="captive_portal"> Ouvrir BackupBox automatiquement quand le téléphone rejoint le Wi-Fi</label>
+        <label class="field">
+          <span id="ntfy-hint">Notifications ntfy quand le Pi a Internet (ex. https://ntfy.sh/mon-sujet ; vide = désactivé)</span>
+          <input type="url" name="ntfy_url" maxlength="300" autocomplete="off" spellcheck="false" placeholder="https://ntfy.sh/…" aria-describedby="ntfy-hint">
+        </label>
       </form>
     </details>
 
@@ -61,8 +89,8 @@
 
   <dialog id="source-dialog" aria-labelledby="source-title" closedby="any">
     <form method="dialog" id="source-form">
-      <h2 id="source-title">Dossier source</h2>
-      <p class="muted" id="source-help">Les fichiers de cette carte iront dans <code>Footage_RAW/&lt;source&gt;/</code>. Une source = un appareil (ex. GoPro, Drone_Keven).</p>
+      <h2 id="source-title">Nom de l'appareil</h2>
+      <p class="muted" id="source-help">Ses fichiers iront dans <code>Footage_RAW/&lt;nom&gt;/</code>. Un nom = un appareil (ex. DJI_Avata_2, GoPro_Keven). BackupBox s'en souviendra.</p>
       <div id="source-choices" class="choices"></div>
       <label class="field">
         <span id="source-new-hint">Ou un nouveau nom : lettres sans accent, chiffres, « _ » ou « - »</span>
