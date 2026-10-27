@@ -4,6 +4,8 @@ Examples::
 
     python -m backupbox.simctl ./sim ssd sda1 --label T7
     python -m backupbox.simctl ./sim card sdb1 --brand gopro --clips 5 --clip-mb 50
+    python -m backupbox.simctl ./sim card sdc1 --brand dji --usb-vendor DJI --usb-model "Avata 2" --usb-serial 1581F6 --sidecars
+    python -m backupbox.simctl ./sim card mtp1 --brand gopro --mtp --usb-model "GoPro HERO12 Black" --usb-serial C3471
     python -m backupbox.simctl ./sim unplug sdb1
 """
 
@@ -23,6 +25,9 @@ CARD_LAYOUTS = {
     "sony": ("PRIVATE/M4ROOT/CLIP", "C{n:04d}.MP4", "Untitled"),
     "generic": ("DCIM/100CAMERA", "IMG_{n:04d}.JPG", "NO NAME"),
 }
+
+# Side files each brand writes next to a clip: (extension, size divisor).
+SIDECARS = {"gopro": [(".LRV", 8), (".THM", 64)], "dji": [(".LRF", 8), (".SRT", 256)]}
 
 
 def _staging(root: Path, kname: str, meta: dict) -> Path:
@@ -52,19 +57,26 @@ def make_card(
     card_uuid: str | None = None,
     serial: str | None = None,
     start: int = 1,
+    usb_vendor: str | None = None,
+    usb_model: str | None = None,
+    usb_serial: str | None = None,
+    mtp: bool = False,
+    sidecars: bool = False,
 ) -> Path:
+    """A card in a reader, or (usb_* / mtp) the device itself on its USB cable."""
     folder, pattern, default_label = CARD_LAYOUTS[brand]
-    media = _staging(
-        root,
-        kname,
-        {
-            "label": label if label is not None else default_label,
-            "uuid": card_uuid or uuid.uuid4().hex[:8].upper(),
-            "fstype": "exfat",
-            "size": 128 * 1000**3,
-            "disk": kname.rstrip("0123456789") or kname,
-        },
-    )
+    meta = {
+        "label": label if label is not None else default_label,
+        "uuid": card_uuid or uuid.uuid4().hex[:8].upper(),
+        "fstype": "exfat",
+        "size": 128 * 1000**3,
+        "disk": kname.rstrip("0123456789") or kname,
+    }
+    if usb_vendor or usb_model or usb_serial:
+        meta.update({"vendor": usb_vendor, "model": usb_model, "serial": usb_serial})
+    if mtp:
+        meta.update({"kind": "mtp", "model": usb_model or "Camera", "serial": usb_serial})
+    media = _staging(root, kname, meta)
     target = media / folder
     target.mkdir(parents=True, exist_ok=True)
     for n in range(start, start + clips):
@@ -77,6 +89,11 @@ def make_card(
                 fh.write(os.urandom(chunk))
                 remaining -= chunk
         os.utime(path, (1767268800 + n * 60, 1767268800 + n * 60))
+        if sidecars:
+            for ext, divisor in SIDECARS.get(brand, []):
+                side = path.with_suffix(ext)
+                side.write_bytes(os.urandom(max(clip_bytes // divisor, 16)))
+                os.utime(side, (1767268800 + n * 60, 1767268800 + n * 60))
     if brand == "gopro":
         misc = media / "MISC"
         misc.mkdir(exist_ok=True)
@@ -121,7 +138,12 @@ def main(argv: list[str] | None = None) -> None:
     card.add_argument("--clip-mb", type=float, default=5)
     card.add_argument("--label")
     card.add_argument("--uuid")
-    card.add_argument("--serial")
+    card.add_argument("--serial", help="GoPro serial written in MISC/version.txt")
+    card.add_argument("--usb-vendor", help="the device itself is plugged in (DJI, GoPro…)")
+    card.add_argument("--usb-model")
+    card.add_argument("--usb-serial")
+    card.add_argument("--mtp", action="store_true", help="the device talks MTP/PTP (GoPro, cameras)")
+    card.add_argument("--sidecars", action="store_true", help="add .LRV/.THM (GoPro) or .LRF/.SRT (DJI)")
     out = sub.add_parser("unplug", help="remove a device")
     out.add_argument("kname")
     args = parser.parse_args(argv)
@@ -139,6 +161,11 @@ def main(argv: list[str] | None = None) -> None:
                 args.label,
                 args.uuid,
                 args.serial,
+                usb_vendor=args.usb_vendor,
+                usb_model=args.usb_model,
+                usb_serial=args.usb_serial,
+                mtp=args.mtp,
+                sidecars=args.sidecars,
             )
         )
     else:

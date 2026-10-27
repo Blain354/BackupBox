@@ -1,9 +1,9 @@
 """Hardware access: listing, mounting, unmounting and powering off devices.
 
 ``LinuxPlatform`` drives the real Pi through ``lsblk`` and ``udisksctl`` (udisks2
-with a polkit rule, so the service never needs root). ``SimPlatform`` maps each
-sub-directory of a folder to a fake device, which lets the whole application run
-and be tested on any computer.
+with a polkit rule, so the service never needs root) and libgphoto2 for cameras
+that speak MTP/PTP. ``SimPlatform`` maps each sub-directory of a folder to a fake
+device, which lets the whole application run and be tested on any computer.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Protocol
 
 from .devices import BlockDevice, list_block_devices
+from .mtp import CameraPort, GphotoBackend, SimCameraSession
 
 log = logging.getLogger(__name__)
 
@@ -40,6 +41,10 @@ class Platform(Protocol):
 
     def total_bytes(self, path: str) -> int: ...
 
+    def list_cameras(self) -> list[CameraPort]: ...
+
+    def open_camera(self, port: CameraPort): ...
+
 
 def _statvfs_free(path: str) -> int:
     st = os.statvfs(path)
@@ -52,7 +57,16 @@ def _statvfs_total(path: str) -> int:
 
 
 class LinuxPlatform:
-    """Real devices through lsblk and udisks2."""
+    """Real devices through lsblk and udisks2; MTP/PTP cameras through libgphoto2."""
+
+    def __init__(self) -> None:
+        self._gphoto = GphotoBackend()
+
+    def list_cameras(self) -> list[CameraPort]:
+        return self._gphoto.list_cameras()
+
+    def open_camera(self, port: CameraPort):
+        return self._gphoto.open(port, alive=lambda: any(c.port == port.port for c in self.list_cameras()))
 
     def list_devices(self) -> list[BlockDevice]:
         return list_block_devices()
@@ -102,8 +116,9 @@ class SimPlatform:
     """Fake devices for development and tests.
 
     Layout: ``<root>/<kname>/device.json`` describes the device (label, uuid,
-    fstype, size, optional free_bytes) and ``<root>/<kname>/media/`` holds its
-    files. Creating the folder plugs the device in; deleting it unplugs it.
+    fstype, size, vendor, model, serial, optional free_bytes; ``"kind": "mtp"``
+    for a camera talking MTP) and ``<root>/<kname>/media/`` holds its files.
+    Creating the folder plugs the device in; deleting it unplugs it.
     """
 
     def __init__(self, root: Path):
@@ -131,6 +146,8 @@ class SimPlatform:
                 if not (self.root / kname / "media").is_dir():
                     continue
                 meta = self._meta(kname)
+                if meta.get("kind") == "mtp":
+                    continue
                 devices.append(
                     BlockDevice(
                         kname=kname,
@@ -145,9 +162,28 @@ class SimPlatform:
                         removable=True,
                         transport="usb",
                         model=meta.get("model"),
+                        vendor=meta.get("vendor"),
+                        serial=meta.get("serial"),
                     )
                 )
         return devices
+
+    def list_cameras(self) -> list[CameraPort]:
+        cameras = []
+        for device in sorted(self.root.iterdir()):
+            if device.name.startswith(".") or not (device / "media").is_dir():
+                continue
+            meta = self._meta(device.name)
+            if meta.get("kind") == "mtp":
+                cameras.append(CameraPort(model=meta.get("model", "Camera"), port=f"sim:{device.name}"))
+        return cameras
+
+    def open_camera(self, port: CameraPort) -> SimCameraSession:
+        kname = port.port.split(":", 1)[1]
+        meta = self._meta(kname)
+        if meta.get("fail_mount"):
+            raise PlatformError(meta["fail_mount"])
+        return SimCameraSession(self.root / kname / "media", meta.get("serial"))
 
     def mount(self, dev: BlockDevice, read_only: bool) -> str:
         meta = self._meta(dev.kname)

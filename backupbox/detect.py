@@ -1,4 +1,16 @@
-"""Recognise camera cards and derive a default source name and a card identity."""
+"""Recognise camera cards and devices; derive a default source name and an identity.
+
+Three ways a source reaches the Pi:
+
+* ``reader``: a card in a USB card reader. Identity comes from the card itself
+  (GoPro serial in ``MISC/version.txt``, else the filesystem UUID).
+* ``direct``: the camera or drone plugged in with its USB cable and exposing its
+  storage as a USB disk (DJI drones, Insta360). The USB vendor/model tell the
+  brand and the USB serial number identifies the device for good, even after
+  the card inside is reformatted.
+* ``mtp``: the camera talks MTP/PTP over USB (GoPro, most photo cameras); see
+  ``mtp.py``.
+"""
 
 from __future__ import annotations
 
@@ -31,6 +43,30 @@ FILE_PATTERNS: list[tuple[re.Pattern, str]] = [
 
 SOURCE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,47}$")
 
+# Substrings of USB vendor/model strings -> brand. A match means the device itself
+# is plugged in (card readers report their own maker: Realtek, Generic, SanDisk…).
+USB_BRANDS: list[tuple[str, str]] = [
+    ("dji", "DJI"),
+    ("gopro", "GoPro"),
+    ("insta360", "Insta360"),
+    ("arashi", "Insta360"),
+    ("hasselblad", "Hasselblad"),
+    ("sony", "Sony"),
+    ("canon", "Canon"),
+    ("nikon", "Nikon"),
+    ("fujifilm", "Fujifilm"),
+    ("panasonic", "Panasonic"),
+    ("olympus", "Olympus"),
+    ("om digital", "OM System"),
+    ("ricoh", "Ricoh"),
+    ("akaso", "Akaso"),
+]
+
+GENERIC_MODELS = {
+    "", "mass storage", "mass-storage", "storage", "disk", "usb", "usb disk", "card reader",
+    "sd card", "sd/mmc", "flash disk", "ums disk", "msc", "removable disk",
+}
+
 
 @dataclass(frozen=True)
 class CardInfo:
@@ -39,6 +75,7 @@ class CardInfo:
     model: str | None
     default_source: str
     identity: str
+    connection: str = "reader"  # reader | direct | mtp
 
 
 def _child(parent: Path, name: str) -> Path | None:
@@ -66,6 +103,50 @@ def validate_source_name(name: str) -> str:
             "Nom de source invalide : lettres sans accent, chiffres, « _ » ou « - », 48 caractères max."
         )
     return name
+
+
+# Card readers sold by camera makers (Sony MRW-…) must not pass for the camera.
+READER_HINTS = ("reader", "mrw-", "card")
+
+
+def brand_from_usb(vendor: str | None, model: str | None) -> str | None:
+    text = f"{vendor or ''} {model or ''}".lower()
+    if any(hint in text for hint in READER_HINTS):
+        return None
+    for needle, brand in USB_BRANDS:
+        if needle in text:
+            return brand
+    return None
+
+
+def _meaningful_model(model: str | None) -> str | None:
+    if not model:
+        return None
+    cleaned = model.strip().replace("_", " ")
+    return None if cleaned.lower() in GENERIC_MODELS else cleaned
+
+
+def _default_for(brand: str, model: str | None) -> str:
+    if model:
+        name = model if model.lower().startswith(brand.lower()) else f"{brand} {model}"
+        slug = slugify_source(name)
+        if slug:
+            return slug
+    return brand
+
+
+def camera_info(model: str, serial: str | None) -> CardInfo:
+    """Identity of a camera seen over MTP/PTP (no filesystem to inspect)."""
+    brand = brand_from_usb(None, model)
+    display = _meaningful_model(model)
+    return CardInfo(
+        is_camera=True,
+        brand=brand,
+        model=display,
+        default_source=_default_for(brand, display) if brand else (slugify_source(model) or "Camera"),
+        identity=f"mtp:{serial}" if serial else f"mtp-model:{model}",
+        connection="mtp",
+    )
 
 
 def read_gopro_version(root: Path) -> dict[str, str]:
@@ -116,13 +197,23 @@ def _has_matching_file(folder: Path, pattern: re.Pattern, limit: int = 50) -> bo
     return False
 
 
-def detect_card(root: Path, label: str | None, uuid: str | None, size: int) -> CardInfo:
-    """Inspect a mounted filesystem and say whether it is a camera card."""
+def detect_card(
+    root: Path,
+    label: str | None,
+    uuid: str | None,
+    size: int,
+    vendor: str | None = None,
+    model: str | None = None,
+    serial: str | None = None,
+) -> CardInfo:
+    """Inspect a mounted filesystem and say whether it is a camera card or device.
+
+    ``vendor``, ``model`` and ``serial`` are the USB descriptors of the disk.
+    """
     root = Path(root)
     dcim = _child(root, "DCIM")
     private = _child(root, "PRIVATE")
     brand: str | None = None
-    model: str | None = None
     is_camera = False
 
     if dcim is not None and dcim.is_dir():
@@ -137,20 +228,41 @@ def detect_card(root: Path, label: str | None, uuid: str | None, size: int) -> C
     gopro = read_gopro_version(root)
     if gopro:
         brand = "GoPro"
-        model = gopro.get("camera type")
 
-    serial = gopro.get("camera serial number")
-    if serial:
-        identity = f"gopro:{serial}"
-    elif uuid:
-        identity = f"fs:{uuid}"
-    else:
-        identity = f"label:{label or ''}:{size}"
+    usb_brand = brand_from_usb(vendor, model)
+    if usb_brand:
+        # The camera/drone itself is on the cable: its USB identity is the best one.
+        usb_model = _meaningful_model(model)
+        identity = f"usb:{usb_brand.lower()}:{serial}" if serial else _card_identity(gopro, uuid, label, size)
+        return CardInfo(
+            is_camera=True,
+            brand=usb_brand,
+            model=usb_model or model_from_card(gopro),
+            default_source=_default_for(usb_brand, usb_model),
+            identity=identity,
+            connection="direct",
+        )
 
+    identity = _card_identity(gopro, uuid, label, size)
     if brand:
         default = brand
     elif label and label.strip().upper() not in GENERIC_LABELS and slugify_source(label):
         default = slugify_source(label)
     else:
         default = "Camera" if is_camera else "Disque"
-    return CardInfo(is_camera=is_camera, brand=brand, model=model, default_source=default, identity=identity)
+    return CardInfo(
+        is_camera=is_camera, brand=brand, model=model_from_card(gopro), default_source=default, identity=identity
+    )
+
+
+def model_from_card(gopro: dict[str, str]) -> str | None:
+    return gopro.get("camera type") or None
+
+
+def _card_identity(gopro: dict[str, str], uuid: str | None, label: str | None, size: int) -> str:
+    serial = gopro.get("camera serial number")
+    if serial:
+        return f"gopro:{serial}"
+    if uuid:
+        return f"fs:{uuid}"
+    return f"label:{label or ''}:{size}"

@@ -294,7 +294,7 @@ def test_us09_card_pulled_mid_copy(box, monkeypatch):
     monkeypatch.setattr(CopyEngine, "_copy_to_tmp", pull_after_first)
     (job,) = box.drain()
     assert job.state == "failed"
-    assert "retirée" in job.error and "Réinsérez" in job.error
+    assert "débranché" in job.error and "Rebranchez" in job.error
     assert list((media / ".backupbox/tmp").iterdir()) == []
     finals = list((box.raw(media) / "GoPro").rglob("*.MP4"))
     assert len(finals) == 1  # only the file verified before the card was pulled
@@ -318,7 +318,7 @@ def test_us09_unstarted_job_cancelled_when_card_removed(box):
     job = box.job_for("sdb1")
     box.unplug("sdb1")
     box.poll()
-    assert job.state == "cancelled" and "retirée" in job.message
+    assert job.state == "cancelled" and "débranché" in job.message
 
 
 # US-10 -----------------------------------------------------------------------
@@ -341,8 +341,9 @@ def test_us13_led_follows_state(box):
     box.ready_destination()
     box.card(clips=1)
     box.poll()
-    assert box.led.state == "busy"
+    assert box.led.state == "attention"  # countdown: waiting for the user, nothing written yet
     box.expire_countdowns()
+    assert box.led.state == "busy"  # queued/writing: do not unplug
     box.drain()
     assert box.led.state == "success"
     box.unplug("sdb1")
@@ -457,7 +458,7 @@ def test_empty_card_and_interrupted_summary(box, monkeypatch):
     box.poll()
     box.expire_countdowns()
     (job,) = box.drain()
-    assert job.state == "done" and job.message == "Carte vide : rien à sauvegarder."
+    assert job.state == "done" and job.message == "Appareil vide : rien à sauvegarder."
 
     box.card("sdc1", clips=3, clip_bytes=10_000)
     box.poll()

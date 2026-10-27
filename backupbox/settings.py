@@ -7,9 +7,14 @@ import threading
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
+from .copier import PRESETS
 from .destination import write_json_atomic
 
 MAX_HISTORY = 200
+BOOL_SETTINGS = (
+    "auto_backup", "auto_eject", "verify", "strict_recheck", "led",
+    "auto_drain", "buzzer", "captive_portal",
+)
 
 
 @dataclass
@@ -20,13 +25,30 @@ class Settings:
     verify: bool = True
     strict_recheck: bool = False
     led: bool = True
+    auto_drain: bool = True
+    default_preset: str = "all"
+    buzzer: bool = True
+    beep_interval_s: int = 1
+    captive_portal: bool = True
+    ntfy_url: str = ""
 
     def validate(self) -> None:
-        if isinstance(self.countdown_s, bool) or not isinstance(self.countdown_s, (int, float)):
-            raise ValueError("Le délai doit être un nombre de secondes.")
-        if not 0 <= int(self.countdown_s) <= 600:
-            raise ValueError("Le délai doit être entre 0 et 600 secondes.")
-        self.countdown_s = int(self.countdown_s)
+        self.countdown_s = _int_in_range(self.countdown_s, 0, 600, "Le délai")
+        self.beep_interval_s = _int_in_range(self.beep_interval_s, 1, 60, "L'intervalle des bips")
+        if self.default_preset not in PRESETS:
+            raise ValueError("Préréglage inconnu.")
+        url = (self.ntfy_url or "").strip()
+        if url and (not url.startswith(("http://", "https://")) or len(url) > 300 or " " in url):
+            raise ValueError("Adresse ntfy invalide : https://ntfy.sh/<sujet> par exemple.")
+        self.ntfy_url = url
+
+
+def _int_in_range(value, low: int, high: int, label: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{label} doit être un nombre de secondes.")
+    if not low <= int(value) <= high:
+        raise ValueError(f"{label} doit être entre {low} et {high} secondes.")
+    return int(value)
 
 
 class StateStore:
@@ -65,7 +87,7 @@ class StateStore:
                     raise ValueError(f"Réglage inconnu : {key}")
                 merged[key] = value
             candidate = Settings(**merged)
-            for name in ("auto_backup", "auto_eject", "verify", "strict_recheck", "led"):
+            for name in BOOL_SETTINGS:
                 if not isinstance(getattr(candidate, name), bool):
                     raise ValueError(f"« {name} » doit être vrai ou faux.")
             candidate.validate()

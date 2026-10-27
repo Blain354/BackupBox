@@ -21,7 +21,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Callable, Iterator
+from typing import BinaryIO, Callable, Iterator, Protocol
 
 from .manifest import Manifest
 
@@ -167,6 +167,84 @@ class Progress:
         }
 
 
+# ------------------------------------------------------------------ presets
+
+VIDEO_EXT = {
+    ".mp4", ".mov", ".insv", ".360", ".mts", ".m2ts", ".avi", ".mxf", ".mkv", ".braw", ".crm", ".r3d", ".hevc",
+}
+PHOTO_EXT = {
+    ".jpg", ".jpeg", ".heic", ".heif", ".dng", ".gpr", ".cr2", ".cr3", ".arw", ".nef", ".raf", ".rw2", ".orf",
+    ".insp", ".png", ".tif", ".tiff",
+}
+# Low-resolution proxies and thumbnails the camera regenerates anyway.
+PREVIEW_EXT = {".lrv", ".lrf", ".thm"}
+
+PRESETS = {
+    "all": "Tout (recommandé)",
+    "no_previews": "Sans aperçus (.LRV .LRF .THM)",
+    "videos_only": "Vidéos seulement",
+}
+DEFAULT_PRESET = "all"
+
+
+def file_category(rel: str) -> str:
+    name = PurePosixPath(rel).name
+    ext = PurePosixPath(name).suffix.lower()
+    if ext in PREVIEW_EXT or name.upper().startswith("LRV_"):
+        return "preview"
+    if ext in VIDEO_EXT:
+        return "video"
+    if ext in PHOTO_EXT:
+        return "photo"
+    return "other"
+
+
+def apply_preset(files: list[SourceFile], preset: str) -> list[SourceFile]:
+    if preset == "no_previews":
+        return [f for f in files if file_category(f.rel) != "preview"]
+    if preset == "videos_only":
+        return [f for f in files if file_category(f.rel) == "video"]
+    return list(files)
+
+
+def inventory(files: list[SourceFile]) -> dict:
+    """What is on a source, by category, to show before transferring."""
+    out = {cat: {"files": 0, "bytes": 0} for cat in ("video", "photo", "preview", "other")}
+    for f in files:
+        bucket = out[file_category(f.rel)]
+        bucket["files"] += 1
+        bucket["bytes"] += f.size
+    out["total"] = {"files": len(files), "bytes": sum(f.size for f in files)}
+    return out
+
+
+# ------------------------------------------------------------------ sources
+
+
+class SourceTree(Protocol):
+    """Where the files come from: a mounted folder, or a camera over MTP/PTP."""
+
+    def scan(self, cancel: threading.Event | None = None) -> list[SourceFile]: ...
+
+    def open(self, rel: str) -> BinaryIO: ...
+
+    def alive(self) -> bool: ...
+
+
+class FsSource:
+    def __init__(self, root: Path):
+        self.root = Path(root)
+
+    def scan(self, cancel: threading.Event | None = None) -> list[SourceFile]:
+        return scan_source(self.root, cancel)
+
+    def open(self, rel: str) -> BinaryIO:
+        return open(self.root / rel, "rb")
+
+    def alive(self) -> bool:
+        return self.root.is_dir()
+
+
 def scan_source(root: Path, cancel: threading.Event | None = None) -> list[SourceFile]:
     """All regular files on the card, junk excluded, symlinks ignored, sorted by path."""
     root = Path(root)
@@ -199,6 +277,14 @@ def _drop_cache(fd: int) -> None:
         pass
 
 
+def _advise(fh, advice_name: str) -> None:
+    """posix_fadvise on a stream when it is backed by a real file descriptor."""
+    try:
+        os.posix_fadvise(fh.fileno(), 0, 0, getattr(os, advice_name))
+    except (AttributeError, OSError, ValueError):
+        pass
+
+
 def _fsync_dir(path: Path) -> None:
     try:
         fd = os.open(path, os.O_RDONLY)
@@ -222,8 +308,9 @@ class CopyEngine:
     def __init__(
         self,
         *,
-        src_root: Path,
         dest_dir: Path,
+        src_root: Path | None = None,
+        source: SourceTree | None = None,
         tmp_dir: Path,
         manifest: Manifest,
         job_id: str,
@@ -235,8 +322,13 @@ class CopyEngine:
         progress: Progress | None = None,
         src_alive: Callable[[], bool] | None = None,
         dest_alive: Callable[[], bool] | None = None,
+        ledger: Manifest | None = None,
     ) -> None:
-        self.src_root = Path(src_root)
+        if source is None:
+            if src_root is None:
+                raise ValueError("source or src_root is required")
+            source = FsSource(Path(src_root))
+        self.source = source
         self.dest_dir = Path(dest_dir)
         self.tmp_dir = Path(tmp_dir)
         self.manifest = manifest
@@ -247,8 +339,10 @@ class CopyEngine:
         self.chunk_size = chunk_size
         self.cancel = cancel or threading.Event()
         self.progress = progress or Progress()
-        self.src_alive = src_alive or (lambda: self.src_root.is_dir())
+        self.src_alive = src_alive or source.alive
         self.dest_alive = dest_alive or (lambda: self.tmp_dir.is_dir())
+        # Pi buffer only: files already moved on to an SSD, whatever the project.
+        self.ledger = ledger
 
     # ---------------------------------------------------------------- planning
 
@@ -273,6 +367,8 @@ class CopyEngine:
         )
 
     def _decide(self, f: SourceFile) -> str:
+        if self.ledger is not None and self.ledger.lookup(f.rel, f.size, f.mtime_ns) is not None:
+            return "skip"  # already moved from the Pi buffer to an SSD, verified
         entry = self.manifest.lookup(f.rel, f.size, f.mtime_ns)
         if entry is not None:
             dest = self.dest_dir / entry["dest"]
@@ -355,7 +451,7 @@ class CopyEngine:
     def _process(self, item: PlanItem) -> FileOutcome:
         f = item.file
         if item.action == "check":
-            src_hash = self._hash_file(self.src_root / f.rel, "lecture carte")
+            src_hash = self._hash_source(f.rel)
             entry = self.manifest.lookup(f.rel, f.size, f.mtime_ns)
             dest_rel = entry["dest"] if entry else f.rel
             dest_hash = self._hash_file(self.dest_dir / dest_rel, "vérification")
@@ -395,11 +491,8 @@ class CopyEngine:
         p.current_step = "copie"
         hasher = new_hasher()
         read_total = 0
-        with open(self.src_root / f.rel, "rb") as fsrc, open(tmp, "wb") as fdst:
-            try:
-                os.posix_fadvise(fsrc.fileno(), 0, 0, os.POSIX_FADV_SEQUENTIAL)
-            except (AttributeError, OSError):
-                pass
+        with self.source.open(f.rel) as fsrc, open(tmp, "wb") as fdst:
+            _advise(fsrc, "POSIX_FADV_SEQUENTIAL")
             for buf in self._pipelined_read(fsrc, hasher):
                 fdst.write(buf)
                 read_total += len(buf)
@@ -407,7 +500,7 @@ class CopyEngine:
             fdst.flush()
             os.fsync(fdst.fileno())
             _drop_cache(fdst.fileno())
-            _drop_cache(fsrc.fileno())
+            _advise(fsrc, "POSIX_FADV_DONTNEED")
         if read_total != f.size:
             raise _FileFailed("Le fichier a changé sur la carte pendant la copie.")
         try:
@@ -461,19 +554,27 @@ class CopyEngine:
             stop.set()
             thread.join(timeout=10)
 
+    def _hash_source(self, rel: str) -> str:
+        with self.source.open(rel) as fh:
+            return self._hash_stream(fh, "lecture carte")
+
     def _hash_file(self, path: Path, step: str) -> str:
+        """Hash a file on the SSD, from the disk itself (page cache dropped first)."""
+        with open(path, "rb") as fh:
+            _drop_cache(fh.fileno())
+            return self._hash_stream(fh, step)
+
+    def _hash_stream(self, fh, step: str) -> str:
         p = self.progress
         p.current_step = step
         hasher = new_hasher()
-        with open(path, "rb") as fh:
-            _drop_cache(fh.fileno())
-            while True:
-                self._check_cancel()
-                buf = fh.read(self.chunk_size)
-                if not buf:
-                    break
-                hasher.update(buf)
-                p.add_work(len(buf))
+        while True:
+            self._check_cancel()
+            buf = fh.read(self.chunk_size)
+            if not buf:
+                break
+            hasher.update(buf)
+            p.add_work(len(buf))
         return hasher.hexdigest()
 
     def _publish(self, f: SourceFile, tmp: Path, digest: str) -> FileOutcome:

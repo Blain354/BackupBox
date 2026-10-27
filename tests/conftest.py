@@ -15,23 +15,45 @@ class FakeLed:
     def __init__(self) -> None:
         self.state = "idle"
         self.history: list[str] = []
+        self.chimes: list[str] = []
 
     def set(self, state: str) -> None:
         if state != self.state:
             self.history.append(state)
         self.state = state
 
+    def chime(self, name: str) -> None:
+        self.chimes.append(name)
+
+
+class FakeNotifier:
+    def __init__(self) -> None:
+        self.sent: list[dict] = []
+
+    def send(self, title, message, priority="default", tags=()):
+        self.sent.append({"title": title, "message": message, "priority": priority, "tags": tags})
+
 
 class Box:
     """A Manager on simulated hardware, driven synchronously by the tests."""
 
-    def __init__(self, tmp_path: Path):
+    def __init__(self, tmp_path: Path, buffer: bool = False, buffer_reserve: int = 0):
         self.root = tmp_path / "dev"
         self.state_dir = tmp_path / "state"
+        self.buffer_dir = tmp_path / "pi-buffer" if buffer else None
         self.platform = SimPlatform(self.root)
         self.store = StateStore(self.state_dir)
         self.led = FakeLed()
-        self.manager = Manager(self.platform, self.store, simulate=True, led=self.led)
+        self.notifier = FakeNotifier()
+        self.manager = Manager(
+            self.platform,
+            self.store,
+            simulate=True,
+            led=self.led,
+            buffer_dir=self.buffer_dir,
+            buffer_reserve=buffer_reserve,
+            notifier=self.notifier,
+        )
 
     # hardware
     def ssd(self, kname="sda1", **kw) -> Path:
@@ -88,3 +110,9 @@ class Box:
 @pytest.fixture
 def box(tmp_path: Path) -> Box:
     return Box(tmp_path)
+
+
+@pytest.fixture
+def bbox(tmp_path: Path) -> Box:
+    """A box with a local buffer on the Pi."""
+    return Box(tmp_path, buffer=True)

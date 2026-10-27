@@ -17,7 +17,8 @@ LED_CANDIDATES = [Path("/sys/class/leds/ACT"), Path("/sys/class/leds/led0")]
 class Led:
     """Drives the green ACT LED so the box can be used without a phone.
 
-    busy -> heartbeat, success -> steady on, error -> fast blink, idle -> SD activity.
+    busy -> heartbeat, attention -> slow blink, success -> steady on,
+    error -> fast blink, idle -> SD activity.
     Needs write access to ``trigger`` and ``brightness`` (udev rule in deploy/).
     Every failure is swallowed: the LED is a convenience, never a reason to stop.
     """
@@ -70,18 +71,21 @@ class Led:
             self._write("brightness", "1")
         elif state == "error":
             self._write("trigger", "none")
-            self._start_blink()
+            self._start_blink(0.15)
+        elif state == "attention":
+            self._write("trigger", "none")
+            self._start_blink(0.6)
         else:
             self._write("trigger", self._idle_trigger)
 
-    def _start_blink(self) -> None:
+    def _start_blink(self, period: float) -> None:
         if self.path is None:
             return
         self._blink_stop.clear()
 
         def run() -> None:
             on = False
-            while not self._blink_stop.wait(0.15):
+            while not self._blink_stop.wait(period):
                 on = not on
                 self._write("brightness", "1" if on else "0")
 

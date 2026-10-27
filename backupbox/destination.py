@@ -40,6 +40,7 @@ class DestinationConfig:
     id: str
     project: str | None
     cards: dict[str, str] = field(default_factory=dict)
+    presets: dict[str, str] = field(default_factory=dict)
     created_at: str = ""
     version: int = CONFIG_VERSION
 
@@ -49,6 +50,7 @@ class DestinationConfig:
             id=str(data.get("id") or uuid.uuid4().hex),
             project=data.get("project"),
             cards={str(k): str(v) for k, v in (data.get("cards") or {}).items()},
+            presets={str(k): str(v) for k, v in (data.get("presets") or {}).items()},
             created_at=str(data.get("created_at") or ""),
             version=int(data.get("version") or CONFIG_VERSION),
         )

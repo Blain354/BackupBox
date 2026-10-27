@@ -1,8 +1,9 @@
 """Block device discovery.
 
-Turns ``lsblk`` JSON into a flat list of filesystems BackupBox may use. Anything
-living on the disk that hosts the running system is excluded up front, so the
-rest of the application never sees the Pi's own SD card.
+Turns ``lsblk`` JSON into a flat list of filesystems BackupBox may use. Any disk
+with a partition mounted by the system (``/``, ``/boot/firmware``, swap, or any
+fstab mount outside ``/media``, such as an internal buffer SSD) is excluded up
+front, so the rest of the application never sees the Pi's own storage.
 """
 
 from __future__ import annotations
@@ -11,10 +12,14 @@ import json
 import subprocess
 from dataclasses import dataclass
 
-LSBLK_COLUMNS = "NAME,KNAME,PATH,PKNAME,TYPE,FSTYPE,LABEL,UUID,SIZE,MOUNTPOINT,RM,HOTPLUG,TRAN,MODEL"
+LSBLK_COLUMNS = "NAME,KNAME,PATH,PKNAME,TYPE,FSTYPE,LABEL,UUID,SIZE,MOUNTPOINT,RM,HOTPLUG,TRAN,MODEL,VENDOR,SERIAL"
 
 # Mount points that identify the disk the OS runs from.
 SYSTEM_MOUNTS = {"/", "/boot", "/boot/firmware", "[SWAP]"}
+
+# Where udisks2 (or a desktop) mounts removable media. Anything mounted elsewhere
+# was mounted by the administrator (fstab) and is not ours to touch.
+USER_MOUNT_PREFIXES = ("/media/", "/run/media/")
 
 # Filesystem types that are never user data.
 IGNORED_FSTYPES = {"swap", "crypto_LUKS", "LVM2_member", "linux_raid_member", "squashfs", "iso9660"}
@@ -41,6 +46,9 @@ class BlockDevice:
     removable: bool
     transport: str | None
     model: str | None
+    vendor: str | None = None
+    serial: str | None = None
+    kind: str = "block"  # block | mtp | buffer
 
     @property
     def key(self) -> str:
@@ -49,7 +57,7 @@ class BlockDevice:
 
     @property
     def supported(self) -> bool:
-        return (self.fstype or "") in SUPPORTED_FSTYPES
+        return self.kind != "block" or (self.fstype or "") in SUPPORTED_FSTYPES
 
     @property
     def display_name(self) -> str:
@@ -73,6 +81,17 @@ def _as_int(value) -> int:
         return 0
 
 
+def _clean(value) -> str | None:
+    text = str(value).strip() if value is not None else ""
+    return text or None
+
+
+def _system_managed(mountpoint: str | None) -> bool:
+    if not mountpoint:
+        return False
+    return mountpoint in SYSTEM_MOUNTS or not mountpoint.startswith(USER_MOUNT_PREFIXES)
+
+
 def _walk(node: dict):
     yield node
     for child in node.get("children") or []:
@@ -90,7 +109,7 @@ def parse_lsblk(text: str) -> list[BlockDevice]:
         ):
             continue
         nodes = list(_walk(disk))
-        if any((n.get("mountpoint") or "") in SYSTEM_MOUNTS for n in nodes):
+        if any(_system_managed(n.get("mountpoint")) for n in nodes):
             continue
         for node in nodes:
             fstype = node.get("fstype")
@@ -115,7 +134,9 @@ def parse_lsblk(text: str) -> list[BlockDevice]:
                     mountpoint=node.get("mountpoint"),
                     removable=_as_bool(disk.get("rm")) or _as_bool(disk.get("hotplug")),
                     transport=disk.get("tran"),
-                    model=disk.get("model"),
+                    model=_clean(disk.get("model")),
+                    vendor=_clean(disk.get("vendor")),
+                    serial=_clean(disk.get("serial")),
                 )
             )
     return devices

@@ -1,11 +1,19 @@
-"""HTTP API and static web UI."""
+"""HTTP API, static web UI and captive portal.
+
+Captive portal: on the BackupBox access point every DNS name resolves to the Pi
+(dnsmasq ``address=/#/10.42.0.1``). When the phone joins the Wi-Fi it checks for
+internet (connectivitycheck.gstatic.com, captive.apple.com…); answering those
+checks with a redirect makes Android and iOS show « Se connecter au réseau »,
+which opens BackupBox. That is the phone notification that works offline.
+"""
 
 from __future__ import annotations
 
+import ipaddress
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -15,8 +23,31 @@ from .manager import ActionError, Manager
 STATIC_DIR = Path(__file__).parent / "static"
 
 
+LOCAL_HOSTNAMES = {"10.42.0.1", "backupbox.lan", "backupbox.local"}
+
+
+def is_foreign_host(host: str, local_names: set[str]) -> bool:
+    """True for a public DNS name that the access point's DNS sent to the Pi."""
+    host = host.strip().lower().rstrip(".")
+    if host.startswith("["):  # IPv6 literal
+        return False
+    host = host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+    if not host or "." not in host or host in local_names:
+        return False
+    try:
+        ipaddress.ip_address(host)
+        return False
+    except ValueError:
+        return True
+
+
 class SourceBody(BaseModel):
     source_name: str | None = None
+    preset: str | None = None
+
+
+class PresetBody(BaseModel):
+    preset: str
 
 
 class NameBody(BaseModel):
@@ -34,10 +65,23 @@ class SettingsBody(BaseModel):
     verify: bool | None = None
     strict_recheck: bool | None = None
     led: bool | None = None
+    auto_drain: bool | None = None
+    default_preset: str | None = None
+    buzzer: bool | None = None
+    beep_interval_s: int | None = None
+    captive_portal: bool | None = None
+    ntfy_url: str | None = None
 
 
-def create_app(manager: Manager) -> FastAPI:
+def create_app(manager: Manager, portal_url: str = "http://10.42.0.1/", extra_hostnames: str = "") -> FastAPI:
     app = FastAPI(title="BackupBox", version=__version__, docs_url="/api/docs", redoc_url=None)
+    local_names = LOCAL_HOSTNAMES | {h.strip().lower() for h in extra_hostnames.split(",") if h.strip()}
+
+    @app.middleware("http")
+    async def captive_portal(request: Request, call_next):
+        if manager.store.settings.captive_portal and is_foreign_host(request.headers.get("host", ""), local_names):
+            return RedirectResponse(portal_url, status_code=302, headers={"Cache-Control": "no-store"})
+        return await call_next(request)
 
     @app.exception_handler(ActionError)
     async def _action_error(_: Request, exc: ActionError):
@@ -59,6 +103,10 @@ def create_app(manager: Manager) -> FastAPI:
     def job_source(job_id: str, body: NameBody):
         return manager.set_job_source(job_id, body.name).to_dict()
 
+    @app.post("/api/jobs/{job_id}/preset")
+    def job_preset(job_id: str, body: PresetBody):
+        return manager.set_job_preset(job_id, body.preset).to_dict()
+
     @app.post("/api/jobs/{job_id}/hold")
     def job_hold(job_id: str):
         return manager.hold_job(job_id).to_dict()
@@ -73,7 +121,9 @@ def create_app(manager: Manager) -> FastAPI:
 
     @app.post("/api/devices/{key}/backup")
     def device_backup(key: str, body: SourceBody | None = None):
-        return manager.start_backup(key, body.source_name if body else None).to_dict()
+        return manager.start_backup(
+            key, body.source_name if body else None, body.preset if body else None
+        ).to_dict()
 
     @app.post("/api/devices/{key}/eject")
     def device_eject(key: str):
@@ -90,6 +140,10 @@ def create_app(manager: Manager) -> FastAPI:
     @app.post("/api/devices/{key}/select")
     def device_select(key: str):
         return manager.select_destination(key).to_dict(manager.platform)
+
+    @app.post("/api/buffer/drain")
+    def buffer_drain():
+        return [job.to_dict() for job in manager.drain_now()]
 
     @app.get("/api/destination/projects")
     def projects():

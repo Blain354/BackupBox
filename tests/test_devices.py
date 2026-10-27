@@ -92,3 +92,12 @@ def test_unsupported_filesystem_is_flagged():
     disk = node("sda", "disk", children=[node("sda1", fstype="apfs")])
     (dev,) = parse_lsblk(lsblk(disk))
     assert dev.supported is False
+
+
+def test_internal_buffer_disk_mounted_by_fstab_is_excluded():
+    internal = node("sda", "disk", rm=False, tran="usb", children=[node("sda1", fstype="ext4", mount="/srv/backupbox/buffer")])
+    drone = node("sdb", "disk", tran="usb", children=[node("sdb1", fstype="exfat", mount="/media/backupbox/DJI")])
+    drone["vendor"], drone["model"], drone["serial"] = "DJI     ", "Avata2", "1581F6"
+    devices = parse_lsblk(lsblk(PI4_SD, internal, drone))
+    assert [d.kname for d in devices] == ["sdb1"]
+    assert (devices[0].vendor, devices[0].model, devices[0].serial) == ("DJI", "Avata2", "1581F6")
