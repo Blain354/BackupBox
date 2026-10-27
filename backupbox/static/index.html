@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#0f172a">
+  <title>BackupBox</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <h1>BackupBox</h1>
+    <span id="status-chip" class="chip">…</span>
+  </header>
+
+  <div id="banners" class="banners"></div>
+  <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+
+  <main>
+    <section aria-labelledby="dest-title" class="panel">
+      <h2 id="dest-title">SSD de destination</h2>
+      <div id="destination"></div>
+    </section>
+
+    <section aria-labelledby="cards-title" class="panel">
+      <h2 id="cards-title">Cartes</h2>
+      <div id="cards" class="stack"></div>
+    </section>
+
+    <details class="panel" id="history-panel">
+      <summary><h2>Historique</h2></summary>
+      <div id="history" class="stack"></div>
+    </details>
+
+    <details class="panel" id="settings-panel">
+      <summary><h2>Réglages</h2></summary>
+      <form id="settings-form" class="settings">
+        <label class="switch"><input type="checkbox" name="auto_backup"> Sauvegarde automatique à l'insertion d'une carte</label>
+        <label class="field">
+          <span>Délai avant le démarrage pour une carte inconnue (secondes)</span>
+          <input type="number" name="countdown_s" min="0" max="600" step="1" inputmode="numeric" required>
+        </label>
+        <label class="switch"><input type="checkbox" name="auto_eject"> Éjecter la carte quand la sauvegarde est vérifiée</label>
+        <label class="switch"><input type="checkbox" name="verify"> Relire chaque fichier sur le SSD pour le vérifier (recommandé)</label>
+        <label class="switch"><input type="checkbox" name="strict_recheck"> Revérifier aussi les fichiers déjà sauvegardés (lent)</label>
+        <label class="switch"><input type="checkbox" name="led"> Utiliser la DEL verte du Pi comme témoin</label>
+      </form>
+    </details>
+
+    <details class="panel" id="system-panel">
+      <summary><h2>Système</h2></summary>
+      <div id="system"></div>
+      <div class="actions">
+        <button type="button" class="btn" data-action="power" data-power="reboot">Redémarrer</button>
+        <button type="button" class="btn danger" data-action="power" data-power="poweroff">Éteindre BackupBox</button>
+      </div>
+    </details>
+  </main>
+
+  <dialog id="source-dialog" aria-labelledby="source-title" closedby="any">
+    <form method="dialog" id="source-form">
+      <h2 id="source-title">Dossier source</h2>
+      <p class="muted" id="source-help">Les fichiers de cette carte iront dans <code>Footage_RAW/&lt;source&gt;/</code>. Une source = un appareil (ex. GoPro, Drone_Keven).</p>
+      <div id="source-choices" class="choices"></div>
+      <label class="field">
+        <span id="source-new-hint">Ou un nouveau nom : lettres sans accent, chiffres, « _ » ou « - »</span>
+        <input type="text" name="new_source" pattern="[A-Za-z0-9][A-Za-z0-9_\-]{0,47}" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="source-new-hint" aria-errormessage="source-error">
+        <span id="source-error" class="error-msg">Nom invalide : lettres sans accent, chiffres, « _ » ou « - ».</span>
+      </label>
+      <div class="actions">
+        <button value="" formnovalidate class="btn">Fermer</button>
+        <button value="start" class="btn primary" autofocus>Enregistrer et démarrer</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="project-dialog" aria-labelledby="project-title" closedby="any">
+    <form method="dialog" id="project-form">
+      <h2 id="project-title">Projet sur le SSD</h2>
+      <p class="muted">Un projet = un voyage. Les cartes iront dans <code>&lt;projet&gt;/Footage_RAW/</code>, le dossier que Footage Organizer attend.</p>
+      <div id="project-choices" class="choices"></div>
+      <label class="field">
+        <span id="project-new-hint">Nouveau projet (ex. Islande_2026 ou Voyages/Islande)</span>
+        <input type="text" name="new_project" maxlength="200" autocomplete="off" spellcheck="false" aria-describedby="project-new-hint">
+      </label>
+      <div class="actions">
+        <button value="" formnovalidate class="btn">Fermer</button>
+        <button value="save" class="btn primary">Utiliser ce projet</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="init-dialog" aria-labelledby="init-title" closedby="any">
+    <form method="dialog" id="init-form">
+      <h2 id="init-title">Utiliser ce disque comme SSD de sauvegarde</h2>
+      <p class="muted">BackupBox ajoute un dossier caché <code>.backupbox</code> et le dossier du projet. Rien n'est effacé.</p>
+      <label class="field">
+        <span id="init-hint">Projet (voyage)</span>
+        <input type="text" name="project" maxlength="200" required autocomplete="off" spellcheck="false" aria-describedby="init-hint">
+      </label>
+      <div class="actions">
+        <button value="" formnovalidate class="btn">Annuler</button>
+        <button value="init" class="btn primary">Initialiser</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="confirm-dialog" aria-labelledby="confirm-title">
+    <form method="dialog">
+      <h2 id="confirm-title">Confirmer</h2>
+      <p id="confirm-text"></p>
+      <div class="actions">
+        <button value="" class="btn" autofocus>Retour</button>
+        <button value="ok" class="btn danger" id="confirm-ok">Confirmer</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="detail-dialog" aria-labelledby="detail-title" closedby="any">
+    <form method="dialog">
+      <h2 id="detail-title">Détails de la sauvegarde</h2>
+      <div id="detail-body"></div>
+      <div class="actions">
+        <button value="" class="btn primary" autofocus>Fermer</button>
+      </div>
+    </form>
+  </dialog>
+</body>
+</html>

@@ -1,0 +1,27 @@
+[project]
+name = "backupbox"
+version = "2.0.0"
+description = "Verified, hands-free offload of camera cards to a travel SSD on a Raspberry Pi"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "xxhash>=3.4",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "httpx>=0.27"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["backupbox*"]
+
+[tool.setuptools.package-data]
+backupbox = ["static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore:Using `httpx` with `starlette.testclient` is deprecated"]
