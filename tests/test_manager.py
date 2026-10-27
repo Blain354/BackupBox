@@ -438,3 +438,40 @@ def test_snapshot_shape(box):
     dest = next(d for d in snap["devices"] if d["role"] == "destination")
     assert dest["project"] == "Islande_2026" and dest["free_bytes"] > 0
     assert snap["jobs"][0]["state"] == "countdown"
+
+
+def test_wait_reason_points_to_uninitialised_ssd(box):
+    box.card(clips=1)
+    box.poll()
+    job = box.job_for("sdb1")
+    assert job.wait_reason == "Branchez le SSD de destination."
+    box.ssd()
+    box.poll()
+    assert "Utiliser comme SSD de destination" in job.wait_reason
+
+
+def test_empty_card_and_interrupted_summary(box, monkeypatch):
+    box.ready_destination()
+    media = box.card(clips=0)
+    (media / "MISC/version.txt").unlink()
+    box.poll()
+    box.expire_countdowns()
+    (job,) = box.drain()
+    assert job.state == "done" and job.message == "Carte vide : rien à sauvegarder."
+
+    box.card("sdc1", clips=3, clip_bytes=10_000)
+    box.poll()
+    box.expire_countdowns()
+    real = CopyEngine._copy_to_tmp
+    calls = {"n": 0}
+
+    def pull(self, f, tmp):
+        calls["n"] += 1
+        if calls["n"] == 3:
+            box.unplug("sdc1")
+        return real(self, f, tmp)
+
+    monkeypatch.setattr(CopyEngine, "_copy_to_tmp", pull)
+    (job2,) = box.drain()
+    assert job2.state == "failed"
+    assert job2.summary["copied"] == 2 and job2.summary["interrupted"] is True

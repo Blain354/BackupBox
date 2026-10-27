@@ -1,0 +1,5 @@
+# BackupBox drives the green ACT LED (heartbeat = copying, steady = done, fast blink = error).
+# Give the service group write access to the two attributes it uses.
+SUBSYSTEM=="leds", KERNEL=="ACT|led0", ACTION=="add", \
+  RUN+="/bin/chgrp backupbox /sys%p/trigger /sys%p/brightness", \
+  RUN+="/bin/chmod g+w /sys%p/trigger /sys%p/brightness"

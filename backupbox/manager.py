@@ -259,6 +259,7 @@ class Manager:
                     self._rearm_pending()
                 elif rec.role == "source":
                     self._maybe_autostart(rec)
+            self._refresh_wait_reasons()
             self._tick()
             self._update_led()
 
@@ -346,6 +347,19 @@ class Manager:
                 return rec
         return dests[0] if dests else None
 
+    def _no_destination_reason(self) -> str:
+        if any(r.role == "unknown" and r.status == "ready" for r in self.devices.values()):
+            return "Déclarez le SSD : bouton « Utiliser comme SSD de destination »."
+        return "Branchez le SSD de destination."
+
+    def _refresh_wait_reasons(self) -> None:
+        if self.active_destination() is not None:
+            return
+        reason = self._no_destination_reason()
+        for job in self.jobs.values():
+            if job.state == "waiting":
+                job.wait_reason = reason
+
     # ------------------------------------------------------------------ jobs
 
     def _maybe_autostart(self, rec: DeviceRecord) -> None:
@@ -376,7 +390,7 @@ class Manager:
         dest = self.active_destination()
         if dest is None:
             job.state, job.deadline = "waiting", None
-            job.wait_reason = "Branchez le SSD de destination."
+            job.wait_reason = self._no_destination_reason()
             return
         if dest.dest.project is None:
             job.state, job.deadline = "waiting", None
@@ -574,7 +588,9 @@ class Manager:
         else:
             job.state = "done"
             new = counts["copied"] + counts["conflict"]
-            if new == 0:
+            if not outcomes:
+                job.message = "Carte vide : rien à sauvegarder."
+            elif new == 0:
                 job.message = f"Déjà sauvegardée : les {counts['skipped']} fichier(s) étaient déjà sur le SSD."
             else:
                 verb = "copiés et vérifiés" if verified else "copiés (sans relecture)"
@@ -586,9 +602,18 @@ class Manager:
                 job.message = ", ".join(parts) + "."
 
     def _summarise_partial(self, job: Job, outcomes) -> None:
-        if outcomes:
-            done = sum(1 for o in outcomes if o.status in {"copied", "conflict", "skipped"})
-            job.summary = {"files": job.progress.files_total, "completed": done}
+        """Counters of an interrupted job: the engine raised, so read its live progress."""
+        p = job.progress
+        if p.files_total:
+            job.summary = {
+                "files": p.files_total,
+                "copied": p.files_copied,
+                "skipped": p.files_skipped,
+                "conflicts": p.files_conflict,
+                "failed": p.files_failed,
+                "bytes_card": p.bytes_card,
+                "interrupted": True,
+            }
 
     def _remember_card(self, dest_rec: DeviceRecord, job: Job) -> None:
         cfg = dest_rec.dest
@@ -825,6 +850,8 @@ class Manager:
         with self._lock:
             if "led" in changes and not settings.led:
                 self.led.set("idle")
+            elif settings.led and not self.simulate and getattr(self.led, "path", None) is None:
+                self.led = Led.autodetect(True)
             self._update_led()
         return settings
 

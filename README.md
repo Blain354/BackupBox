@@ -1,49 +1,73 @@
-# Pi File Transfer (Offline-friendly)
+# BackupBox
 
-Application web (Flask) pour Raspberry Pi pour copier/couper des dossiers volumineux d'un stockage à un autre, avec UI mobile.
+Un Raspberry Pi 4 qui vide les cartes de caméra (GoPro, drones DJI, Insta360, appareils photo) vers le SSD de voyage, **sans laptop**, et **prouve** que chaque fichier est bien copié avant qu'on reformate la carte.
 
-## Caractéristiques
-- Détection des périphériques montés via `lsblk` (ou /media, /mnt en fallback)
-- Navigation par arborescence (sélection de dossier source et dossier destination)
-- Boutons **Copier**, **Couper**, **Éjecter**
-- Barre de progression + pourcentage, vitesse (si `rsync`), ETA
-- Fonctionne offline (aucune dépendance réseau)
-- Démarrage automatique au boot via `systemd`
+1. On branche le SSD.
+2. On insère une carte.
+3. La sauvegarde démarre seule. Le téléphone, connecté au Wi-Fi `BackupBox`, sert à suivre la progression, nommer la source et éjecter. Sans téléphone, la DEL verte du Pi indique l'état :
 
-## Installation (mise à jour incluse)
-1. Copiez le zip sur le Pi, puis décompressez:
-   ```bash
-   unzip pi-file-transfer.zip
-   cd pi-file-transfer
-   ```
-2. Lancer le script d'installation (écrase la version précédente et redémarre le service):
-   ```bash
-   ./install.sh
-   ```
+| DEL verte | État |
+|---|---|
+| cœur | copie en cours |
+| fixe | sauvegarde vérifiée |
+| clignote vite | erreur |
 
-Le service démarre automatiquement: `pi-file-transfer.service`.
-Accès: `http://<IP-du-Pi>:8080`
+Le SSD sort rangé pour [Footage Organizer](https://github.com/blain-projects/Footage_organizer_web) :
 
-## Scripts
+```
+<projet>/Footage_RAW/<source>/DCIM/100GOPRO/GX010001.MP4
+```
 
-- `setup.sh <url>` : télécharge l'archive ZIP du projet (via Internet) puis lance `install.sh`.
-- `update.sh <archive.zip>` : met à jour une installation existante à partir d'une archive locale sans connexion réseau.
+## Ce qui est garanti
 
-## Éjection
-Le bouton "Éjecter" tente `umount <mountpoint>` puis `sync`. Selon votre configuration, `sudo` peut être requis.
-Si nécessaire, ajoutez pour `umount` l'autorisation sans mot de passe au groupe `pi` (optionnel).
+- **Vérification réelle.** Chaque fichier est relu depuis le SSD, cache vidé, puis comparé par empreinte xxh128 à ce qui a été lu sur la carte. Un fichier n'apparaît sous son nom final qu'une fois vérifié.
+- **Carte intouchable.** Elle est montée en lecture seule, et rien n'y est jamais écrit ni effacé.
+- **Rien n'est écrasé.** Un nom identique avec un contenu différent donne `NOM_conflit-<hash>.ext`.
+- **Reprise incrémentale.** Une carte réinsérée ne copie que ses nouveaux clips.
+- **Robuste aux incidents.** Une carte ou un SSD retiré, un disque plein ou une coupure de courant produisent un message clair et jamais de fichier à moitié copié.
 
-## Notes
-- `rsync` est utilisé par défaut pour des gros transferts fiables. Si `rsync` n'est pas disponible, un fallback Python plus lent est utilisé.
-- Sur certaines images OS, les supports sont montés dans `/media/pi/<label>` ou `/run/media/pi/<label>`.
+## Documentation
 
-## Démarrage en AP (Access Point)
-Cette app n'implique pas la config AP. Utilisez `raspi-config` ou des scripts (`hostapd`, `dnsmasq`). Une fois le Wi‑Fi AP actif, connectez votre téléphone et ouvrez l'IP du Pi sur le port 8080.
+| Document | Pour qui |
+|---|---|
+| [docs/RASPBERRY-PI-SETUP.md](docs/RASPBERRY-PI-SETUP.md) | Préparer le Pi : OS, accès requis, service, Wi-Fi, recette sur le matériel |
+| [docs/DESIGN.md](docs/DESIGN.md) | Problème, user stories et critères d'acceptation, architecture, décisions |
+
+## Installation sur le Pi (résumé)
+
+```bash
+git clone https://github.com/Blain354/BackupBox.git ~/BackupBox && cd ~/BackupBox
+sudo deploy/install.sh
+sudo deploy/setup-hotspot.sh '<mot-de-passe-wifi>'
+```
+
+Ensuite, depuis le téléphone : Wi-Fi `BackupBox`, puis **http://10.42.0.1**.
+
+## Essayer sans Raspberry Pi (mode simulation)
+
+Chaque sous-dossier d'un dossier de simulation joue le rôle d'un disque.
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m backupbox --simulate ./sim/dev --state-dir ./sim/state --port 8080 &
+.venv/bin/python -m backupbox.simctl ./sim/dev ssd sda1 --label T7                   # brancher un SSD
+.venv/bin/python -m backupbox.simctl ./sim/dev card sdb1 --brand gopro --clips 5    # insérer une carte
+.venv/bin/python -m backupbox.simctl ./sim/dev unplug sdb1                          # la retirer
+# ouvrir http://localhost:8080
+```
+
+## Tests
+
+```bash
+.venv/bin/python -m pytest      # 83 tests : moteur de copie, user stories, API, plateforme
+tests/e2e/run.sh                # parcours complet au téléphone (Playwright)
+```
 
 ## Désinstallation
+
 ```bash
-sudo systemctl disable --now pi-file-transfer.service
-sudo rm -rf /opt/pi-file-transfer
-sudo rm -f /etc/systemd/system/pi-file-transfer.service
-sudo systemctl daemon-reload
+sudo systemctl disable --now backupbox
+sudo rm -rf /opt/backupbox /var/lib/backupbox
+sudo rm -f /etc/systemd/system/backupbox.service /etc/polkit-1/rules.d/50-backupbox.rules /etc/udev/rules.d/99-backupbox-led.rules
+sudo systemctl daemon-reload && sudo userdel backupbox
 ```
