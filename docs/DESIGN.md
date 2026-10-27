@@ -2,13 +2,14 @@
 
 ## 1. Le problème
 
-En voyage, Guillaume filme avec plusieurs appareils : GoPro, drones DJI (Avata 2, Mini 4), et ceux des amis (`Drone_Keven`, `Drone_Kyle`…). Les cartes se remplissent, et il faut :
+En voyage, Guillaume filme avec plusieurs appareils : drones DJI (Avata 2, Mini 5 Pro), GoPro, appareil photo, et ceux des amis (`Drone_Keven`, `Drone_Kyle`…). Une session de drone fait 50 à 75 Go. Il faut :
 
-1. vider chaque carte vers le **SSD de voyage**, sans laptop ;
+1. vider un appareil **sur le terrain**, sans laptop et sans forcément avoir le SSD, idéalement en branchant l'appareil lui-même par son câble USB-C ;
 2. avoir la **preuve** que tout est bien copié avant de reformater la carte dans l'appareil ;
-3. retrouver au retour un SSD rangé comme **Footage Organizer** l'attend : `<projet>/Footage_RAW/<source>/…`.
+3. le soir, retrouver tout sur le **SSD de voyage**, sans manipulation, rangé comme **Footage Organizer** l'attend : `<projet>/Footage_RAW/<source>/…` ;
+4. une boîte fermée qui traîne au fond du sac, qui **prévient d'elle-même** : notification sur le téléphone en arrivant sur son Wi-Fi, bips et DEL tant qu'il ne faut rien débrancher.
 
-BackupBox est un Raspberry Pi 4 dans une boîte : on branche le SSD, on insère une carte, la sauvegarde se fait seule. Le téléphone, connecté au Wi-Fi du Pi, sert à suivre, nommer la source et éjecter. Sans téléphone, la DEL verte dit où on en est.
+BackupBox est un Raspberry Pi 4 dans une boîte. Quand on branche un appareil, la sauvegarde se fait seule vers le SSD s'il est là, sinon vers le **tampon** du Pi. Ce tampon se vide tout seul dans le SSD dès qu'il est branché. Le téléphone sert à confirmer d'un toucher (« Tout transférer »), nommer un nouvel appareil, choisir quoi copier et suivre. Sans téléphone, le buzzer, la DEL et un bouton suffisent.
 
 ### Pourquoi l'ancienne version (août 2025) était inutilisable
 
@@ -58,12 +59,20 @@ Chaque critère est couvert par un test automatisé. Les fichiers sont dans `tes
 | US-16 | J'éteins la boîte depuis le téléphone. | Arrêt ou redémarrage via logind (polkit). Refus pendant une copie. | `test_manager::test_us16_*`, `test_api::test_manual_backup_and_poweroff` |
 | US-17 | Je suis prévenu d'une alimentation insuffisante. | Bannière rouge (sous-tension en cours) ou orange (depuis le démarrage), d'après `get_throttled`. | `test_platform::test_power_status_flags` |
 | US-18 | Une erreur de lecture ou d'écriture ne passe pas inaperçue. | Une relecture qui ne concorde pas est réessayée une fois, puis le fichier est marqué en échec, sans nom final. La tâche est alors « incomplète » : « Ne formatez pas la carte ». Un fichier modifié pendant la copie est signalé. | `test_copier::test_verification_mismatch_*`, `test_transient_*`, `test_file_changing_*`, `test_unreadable_file_fails_alone` |
+| US-19 | Je branche mon drone ou ma GoPro **directement par câble** ; BackupBox sait de quel appareil il s'agit. | Un drone qui se montre comme disque USB est reconnu par son fabricant et son modèle USB (« DJI Avata 2 »), et identifié **pour toujours** par son numéro de série USB, même carte reformatée. Deux drones vont dans deux dossiers. Un lecteur de cartes vendu par un fabricant d'appareils (Sony MRW-…) reste un lecteur. Une GoPro ou un appareil photo en **MTP/PTP** est lu par libgphoto2, en blocs de 8 Mio, avec la même vérification. | `test_field_workflow::test_us19_*`, `test_mtp`, `test_detect`, E2E |
+| US-20 | Sans SSD sur le terrain, je vide le drone dans le Pi. | Sans SSD, la destination est le **tampon du Pi**. Une réserve (10 Go par défaut) protège l'OS ; un tampon trop plein refuse avant de copier. L'interface montre ce qui attend le SSD. | `test_us20_*`, E2E |
+| US-21 | Si je branche le SSD pendant que BackupBox me propose de transférer, le SSD a la priorité. | Un décompte en cours vers le tampon passe au SSD au branchement, et inversement si le SSD est débranché. | `test_us21_*` |
+| US-22 | Le soir, je branche le SSD : le tampon s'y vide seul. | Le vidage démarre seul (réglable) : copie vérifiée vers `<projet>/Footage_RAW/<source>/` sur le SSD, puis effacement **du tampon seulement**. Les fichiers déplacés sont notés dans un registre, pour qu'un drone non formaté ne soit pas recopié. Un SSD débranché ou plein ne fait rien perdre. Un échec n'entraîne pas de boucle de réessai ; un bouton « Vider vers le SSD » permet de relancer. | `test_us22_*`, E2E |
+| US-23 | Je choisis de ne copier que les vidéos, ou de laisser les aperçus. | Préréglages « Tout », « Sans aperçus (.LRV .LRF .THM) » (les `.SRT` de télémétrie restent), « Vidéos seulement », mémorisés par appareil. L'interface affiche le contenu (vidéos, photos, annexes, taille) et la taille prévue avant le transfert. | `test_us23_*`, `test_api::test_presets_and_drain_endpoints`, E2E |
+| US-24 | Mon téléphone me prévient quand la boîte est prête, et en fin de transfert. | En arrivant sur le Wi-Fi `BackupBox`, les tests de connectivité d'Android, iOS et Windows sont redirigés vers l'interface : le téléphone affiche « Se connecter au réseau ». Les noms locaux et les adresses IP ne sont jamais redirigés. Avec Internet, des notifications ntfy partent au branchement, à la fin et en cas d'échec, avec un lien vers l'interface. | `test_api::test_connectivity_checks_*`, `test_notify`, `test_us24_*` |
+| US-25 | Sans téléphone, un bouton suffit. | Appui court : démarre ce qui attend. Appui de 3 s : arrêt propre, refusé pendant une écriture. | `test_us25_*`, `test_indicators::test_button_*` |
+| US-26 | Tant qu'il ne faut rien débrancher, la boîte le dit. | Pendant l'écriture : double bip toutes les N s (1 s par défaut, réglable) et clignotement court. En attente de l'utilisateur : clignotement lent, 1 bip. Terminé : DEL fixe, 3 bips courts. Erreur : clignotement rapide, 3 bips longs. Tout se coupe dans les réglages. Bannière « ne débranchez rien » dans l'interface. | `test_us26_*`, `test_indicators`, `test_us13_*` |
 
 Lancer les tests :
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/python -m pytest            # 83 tests
+.venv/bin/python -m pytest            # 123 tests
 tests/e2e/run.sh [dossier-captures]   # parcours Playwright (Node + Playwright requis)
 ```
 
@@ -73,16 +82,19 @@ tests/e2e/run.sh [dossier-captures]   # parcours Playwright (Node + Playwright r
 
 ```
 backupbox/
-  devices.py      lsblk → périphériques candidats (disque système exclu)
-  platform.py     LinuxPlatform (lsblk + udisksctl) | SimPlatform (dossiers = disques)
-  detect.py       carte d'appareil ? marque, source par défaut, identité de la carte
+  devices.py      lsblk → périphériques candidats (disque système et montages fstab exclus)
+  platform.py     LinuxPlatform (lsblk + udisksctl + gphoto2) | SimPlatform (dossiers = appareils)
+  mtp.py          appareils MTP/PTP (GoPro, appareils photo) via libgphoto2
+  detect.py       carte ou appareil ? marque, modèle, nom par défaut, identité
   destination.py  marque .backupbox, projets, Footage_RAW, nettoyage tmp
   copier.py       moteur de copie vérifiée + progression
   manifest.py     JSONL des fichiers vérifiés, par source
-  manager.py      orchestrateur : sondage, minuteries, file, actions, instantané
+  manager.py      orchestrateur : sondage, minuteries, tampon et vidage, file, actions
+  indicators.py   DEL ACT, DEL GPIO, buzzer, bouton (gpiozero, facultatif)
+  notify.py       notifications ntfy (quand le Pi a Internet)
   settings.py     réglages, SSD connus, historique (/var/lib/backupbox)
   system.py       DEL, état d'alimentation, horloge, arrêt
-  api.py          FastAPI : /api/* + interface statique
+  api.py          FastAPI : /api/* + interface statique + portail captif
   simctl.py       brancher ou débrancher des faux disques (mode simulation)
   static/         interface mobile (HTML/CSS/JS sans dépendance)
 ```
@@ -106,12 +118,17 @@ nouvelle carte ─┤                                                 │ SSD ou
 
 `done` = tout vérifié ; `partial` = au moins un fichier en échec ; `failed` = tâche interrompue (carte ou SSD retiré, espace insuffisant).
 
+**Destination d'une tâche « appareil »** : le SSD branché (avec un projet), sinon le tampon du Pi. Elle est choisie au moment où la tâche est armée, puis de nouveau quand un SSD apparaît ou disparaît.
+
+**Tâche « vidage »** (une par projet et par source du tampon) : créée quand un SSD avec projet est branché et que le tampon contient des fichiers. Elle copie et vérifie vers le SSD. Ensuite, pour chaque fichier vérifié, elle ajoute une ligne au registre `tampon/.backupbox/drained/<source>.jsonl`, puis efface le fichier du tampon. Un projet provisoire « Sans_projet » (tampon rempli avant tout SSD) est versé dans le projet actif du SSD.
+
 ### Invariants
 
 1. **Un fichier sous son nom final dans `Footage_RAW` a toujours été vérifié.** L'écriture se fait dans `.backupbox/tmp/`, suivie de `fsync`, de `POSIX_FADV_DONTNEED`, de la relecture et de la comparaison. Le renommage n'a lieu qu'ensuite (même système de fichiers, donc atomique), puis le manifeste est complété.
 2. **La carte n'est jamais écrite.** Elle est montée `ro`, et le moteur n'ouvre la source qu'en lecture.
 3. **Rien n'est jamais écrasé ni effacé** sur le SSD, hors `.backupbox/tmp/`.
 4. **Le disque système n'existe pas pour l'application** : il est filtré dès `lsblk`.
+5. **Un fichier n'est effacé du tampon qu'après sa vérification sur un SSD.** Il est noté dans le registre *avant* l'effacement.
 
 ### Organisation sur le SSD
 
@@ -149,6 +166,15 @@ Footage Organizer accepte les sous-dossiers de carte (`GoPro/DCIM/100GOPRO/`). L
 | Authentification | Aucune ; le mot de passe WPA2 du point d'accès est la barrière | Boîte personnelle, réseau privé. L'API n'accepte aucun chemin arbitraire. |
 | Port | 80 via `CAP_NET_BIND_SERVICE` | URL la plus simple au téléphone, sans root. |
 | Une destination à la fois | Oui (préférence mémorisée si plusieurs) | La copie vers deux SSD (miroir) est reportée. |
+| Effacer l'appareil après un transfert vers le tampon | **Non** | Il n'existe alors que deux copies, l'appareil et le Pi. Effacer l'appareil en laisserait une seule, au fond d'un sac. On formate dans l'appareil une fois le SSD rempli ; l'interface le dit. |
+| Tampon local | Un dossier configurable (`BACKUPBOX_BUFFER_DIR`), traité comme une destination interne | Le même moteur, les mêmes manifestes, la même vérification. Le matériel est au choix (microSD, SSD interne) : voir MATERIEL.md. |
+| Priorité SSD | Le SSD gagne toujours, y compris pendant un décompte | C'est la demande : « le SSD doit prendre priorité ». |
+| Registre de vidage global au tampon | `.backupbox/drained/<source>.jsonl` à la racine du tampon | Le projet du tampon suit celui du SSD : un registre rangé par projet raterait les fichiers déjà vidés (bogue trouvé par `test_us22_drained_clips_*`). |
+| Identité d'un appareil branché par câble | `usb:<marque>:<n° de série USB>` | Stable même après un formatage. Les lecteurs de cartes donnent leur propre numéro : seul un fabricant d'appareil, hors lecteurs, est pris pour l'appareil. |
+| MTP/PTP | libgphoto2 (paquet `gphoto2`, roue aarch64 qui inclut la bibliothèque) | GoPro et appareils photo ne se montrent pas comme disque. L'empreinte est calculée sur les octets reçus par USB, et la relecture vérifie le disque. Pas de seconde lecture de l'appareil : elle doublerait le temps sur un lien déjà lent. |
+| Notification hors ligne | Portail captif (DNS joker + redirection des tests de connectivité) | Sans Internet, aucun service push n'est joignable. Le portail est le seul mécanisme que les téléphones affichent seuls. On ne prétend jamais avoir Internet (pas de `204`) : le téléphone garde ses données mobiles. |
+| Notification en ligne | ntfy (JSON, tâche de fond, sans réessai) | Gratuit, application Android/iOS, auto-hébergeable. Un échec réseau ne ralentit jamais une sauvegarde. |
+| Buzzer | Double bip toutes les N s pendant l'écriture (1 s par défaut, demandé) | Avis : 5–10 s est plus vivable sur une heure de copie ; c'est réglable et se coupe. |
 
 ---
 
@@ -160,13 +186,14 @@ Footage Organizer accepte les sous-dossiers de carte (`GoPro/DCIM/100GOPRO/`). L
   - la propagation des montages vers le service ;
   - les permissions de la DEL ;
   - le débit réel.
-- Les téléphones (MTP) ne sont pas des périphériques de stockage USB : non pris en charge.
+- Le MTP/PTP, l'identification des drones par l'USB, le portail captif et les GPIO n'ont été testés qu'avec des simulations : fausse caméra gphoto2, broches simulées par gpiozero, requêtes HTTP avec en-tête `Host`. Les recettes R19 à R26 sont là pour ça.
+- Les téléphones (MTP) peuvent être vus comme des appareils photo par libgphoto2. Ce cas n'a pas été visé.
 - Pas de réaffectation après coup d'une sauvegarde vers une autre source. Il faut renommer à la main, en tenant compte du manifeste.
 - L'heure du Pi 4 peut être fausse sans réseau ; seules les dates de l'historique en souffrent.
 - Idées :
   - miroir vers deux SSD ;
   - écran e-ink ou OLED ;
-  - bouton physique d'éjection ;
+  - « Libérer l'appareil » une fois **deux** copies vérifiées (tampon + SSD), si le formatage dans l'appareil s'avère trop pénible ;
   - export MHL ;
   - mise à jour hors ligne par clé USB ;
   - affectation de la source par appareil photo (modèle EXIF).

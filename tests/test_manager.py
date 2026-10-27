@@ -201,7 +201,7 @@ def test_us05_report_history_and_card_untouched(box):
 
 def test_us06_reinserted_card_copies_only_new_clips(box):
     media = box.ready_destination()
-    card = box.card(clips=2, serial="S")
+    box.card(clips=2, serial="S")
     box.poll()
     box.expire_countdowns()
     box.drain()

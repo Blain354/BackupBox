@@ -12,6 +12,8 @@ WorkingDirectory=/opt/backupbox/app
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONPATH=/opt/backupbox/app
 Environment=BACKUPBOX_PORT=80
+# Buffer, GPIO pins, portal address: see deploy/backupbox.env
+EnvironmentFile=-/etc/default/backupbox
 ExecStart=/opt/backupbox/venv/bin/python -m backupbox
 # Settings and history live in /var/lib/backupbox (created by systemd).
 StateDirectory=backupbox

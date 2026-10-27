@@ -1,5 +1,9 @@
 # Runtime dependencies, pinned to the versions the test suite ran with.
-# All have aarch64 wheels on PyPI (Raspberry Pi OS 64-bit, Python 3.11+).
+# All have aarch64 wheels on PyPI (Raspberry Pi OS 64-bit, Python 3.11+);
+# gphoto2 bundles libgphoto2. gpiozero's pin backend (lgpio) comes from apt
+# (python3-lgpio), hence the venv with --system-site-packages in install.sh.
 fastapi==0.162.0
 uvicorn==0.54.0
 xxhash==4.0.2
+gphoto2==2.6.4
+gpiozero==2.0.1.post3

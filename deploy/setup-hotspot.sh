@@ -1,12 +1,20 @@
 #!/usr/bin/env bash
 # Turn wlan0 into the "BackupBox" Wi-Fi access point with NetworkManager.
-# Usage:  sudo deploy/setup-hotspot.sh <mot-de-passe-wifi> [SSID] [interface]
+# Usage:  sudo deploy/setup-hotspot.sh [--no-portal] <mot-de-passe-wifi> [SSID] [interface]
 # The phone then opens http://10.42.0.1 (or http://backupbox.lan).
+# By default every DNS name resolves to the Pi on this network (captive portal):
+# when the phone joins « BackupBox », Android/iOS show « Se connecter au réseau »,
+# which opens BackupBox. --no-portal only answers backupbox.lan.
 set -euo pipefail
 
 if [[ $EUID -ne 0 ]]; then
   echo "Lancer avec sudo." >&2
   exit 1
+fi
+PORTAL=1
+if [[ "${1:-}" == "--no-portal" ]]; then
+  PORTAL=0
+  shift
 fi
 PSK=${1:-}
 SSID=${2:-BackupBox}
@@ -35,7 +43,13 @@ nmcli connection add type wifi ifname "$IFACE" con-name "$CON" autoconnect yes s
 
 # Friendly name inside the hotspot (NetworkManager's dnsmasq reads this folder).
 install -d /etc/NetworkManager/dnsmasq-shared.d
-echo "address=/backupbox.lan/10.42.0.1" > /etc/NetworkManager/dnsmasq-shared.d/backupbox.conf
+{
+  echo "address=/backupbox.lan/10.42.0.1"
+  if [[ $PORTAL -eq 1 ]]; then
+    echo "# captive portal: every name -> the Pi (the hotspot has no internet anyway)"
+    echo "address=/#/10.42.0.1"
+  fi
+} > /etc/NetworkManager/dnsmasq-shared.d/backupbox.conf
 
 nmcli connection up "$CON"
 echo "[✓] Point d'accès « $SSID » actif. Interface : http://10.42.0.1"

@@ -1,0 +1,8 @@
+# BackupBox reads GoPro and photo cameras over MTP/PTP (libgphoto2) as the
+# unprivileged « backupbox » user: give its group access to their USB nodes.
+# 1) anything libgphoto2 / libmtp recognise (their own rules set these flags)
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_GPHOTO2}=="1", GROUP="backupbox", MODE="0660"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_MTP_DEVICE}=="1", GROUP="backupbox", MODE="0660"
+# 2) camera and drone makers, in case their model is too recent for those lists:
+#    GoPro, DJI, Insta360, Sony, Canon, Nikon, Fujifilm, Panasonic, Olympus/OM, Ricoh
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="2672|2ca3|2e1a|054c|04a9|04b0|04cb|04da|07b4|05ca", GROUP="backupbox", MODE="0660"
